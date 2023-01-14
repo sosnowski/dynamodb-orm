@@ -1,0 +1,45 @@
+{
+  "name": "dynamodb-orm",
+  "version": "0.0.1",
+  "description": "ORM-like library for DynamoDB",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sosnowski/dynamodb-orm.git"
+  },
+  "keywords": [
+    "aws",
+    "dynamodb",
+    "orm",
+    "database"
+  ],
+  "author": "Damian Sosnowski",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sosnowski/dynamodb-orm/issues"
+  },
+  "homepage": "https://github.com/sosnowski/dynamodb-orm#readme",
+  "dependencies": {
+    "@aws-sdk/lib-dynamodb": "^3.245.0"
+  },
+  "devDependencies": {
+    "typescript": "^4.9.4",
+    "vitest": "^0.27.1",
+    "@types/prettier": "2.6.0",
+    "@typescript-eslint/eslint-plugin": "^5.42.1",
+    "@typescript-eslint/parser": "^5.42.1",
+    "@vitest/coverage-c8": "^0.26.3",
+    "eslint": "^8.27.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-jest": "^27.1.5",
+    "eslint-plugin-prettier": "^4.2.1",
+    "eslint-plugin-simple-import-sort": "^8.0.0"
+  }
+}

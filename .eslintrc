@@ -1,0 +1,87 @@
+{
+    "env": {
+        // "jest": true,
+        "es6": true,
+        "browser": false,
+        "node": true
+    },
+    "parser": "@typescript-eslint/parser",
+    "extends": [
+        "eslint:recommended",
+        // "plugin:jest/recommended",
+        // "plugin:react/recommended", // Uses the recommended rules from @eslint-plugin-react
+        "plugin:@typescript-eslint/recommended", // Uses the recommended rules from @typescript-eslint/eslint-plugin
+        "prettier/@typescript-eslint",
+        "plugin:prettier/recommended"
+        // "plugin:react-hooks/recommended",
+        // "plugin:cypress/recommended"
+    ],
+    "parserOptions": {
+        "ecmaVersion": 2018, // Allows for the parsing of modern ECMAScript features
+        "sourceType": "module", // Allows for the use of imports
+        "ecmaFeatures": {
+            "jsx": true // Allows for the parsing of JSX
+        }
+    },
+    "rules": {
+        "eqeqeq": ["error", "always"],
+        "semi": ["error", "always"],
+        "quotes": ["error", "single"],
+        "eol-last": ["error", "always"],
+        // "no-console": "error",
+        "no-unused-vars": ["error", { "ignoreRestSiblings": true }],
+        "prettier/prettier": "error",
+        // "react/prop-types": 0,
+        "linebreak-style": ["error", "unix"],
+        // "react-hooks/exhaustive-deps": "error",
+        // "jest/expect-expect": [
+        //     "error",
+        //     {
+        //         "assertFunctionNames": ["expect", "checkForLink", "checkForMobileApp", "checkForSocialMedia"]
+        //     }
+        // ],
+        "no-unmodified-loop-condition": ["error"],
+        "newline-after-var": ["error", "always"],
+        "newline-before-return": "error",
+        "simple-import-sort/imports": "error",
+        "simple-import-sort/exports": "error"
+    },
+    "ignorePatterns": ["node_modules"],
+    "settings": {
+        "react": {
+            "version": "detect" // Tells eslint-plugin-react to automatically detect the version of React to use
+        }
+    },
+    "plugins": [
+        // "jest",
+        "prettier",
+        // "react",
+        // "react-hooks",
+        "@typescript-eslint",
+        "simple-import-sort"
+    ],
+    "overrides": [
+        {
+            "files": ["**/*.js"],
+            "rules": {
+                "@typescript-eslint/explicit-function-return-type": 0,
+                "@typescript-eslint/explicit-module-boundary-types": 0,
+                "@typescript/no-var-requires": 0
+            }
+        },
+        // {
+        //     "files": ["cypress/**/*.ts"],
+        //     "rules": {
+        //         "jest/no-export": 0
+        //     }
+        // },
+        {
+            "files": ["**/*.{ts,tsx}"],
+            "rules": {
+                "@typescript-eslint/explicit-function-return-type": ["error"],
+                "no-unused-vars": 0,
+                "@typescript-eslint/no-unused-vars": ["error", { "ignoreRestSiblings": true }]
+            }
+        }
+    ]
+}
