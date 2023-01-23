@@ -7,7 +7,12 @@ import type {
 	DeleteCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import type { NativeAttributeValue } from '@aws-sdk/util-dynamodb';
-import { DeleteItemCommand, GetItemCommand, PutItemCommand, QueryItemsCommand, UpdateItemCommand } from './commands';
+import { DbClient } from './client';
+import { DeleteItemCommand } from './commands/delete';
+import { GetItemCommand } from './commands/get';
+import { PutItemCommand } from './commands/put';
+import { QueryItemsCommand } from './commands/query';
+import { UpdateItemCommand } from './commands/update';
 import { calculateUpdateData, Entity, EntityRecord } from './entity';
 import { marshallItem } from './marshall';
 
@@ -47,49 +52,6 @@ const matchKeyToTable = (key: Key, config: TableConfig): Record<string, NativeAt
 	return matchedKey;
 };
 
-const updateDataToInput = (
-	updateData: UpdateData,
-): Pick<UpdateCommandInput, 'UpdateExpression' | 'ExpressionAttributeNames' | 'ExpressionAttributeValues'> => {
-	const updatedFields = Object.keys(updateData.set || {});
-	const removedFields = updateData.remove || [];
-
-	let updateExpression = '';
-	let attributesNames: Record<string, string> = {};
-	let attributesValues: Record<string, NativeAttributeValue> = {};
-
-	if (updatedFields.length > 0) {
-		updateExpression += ' SET ';
-		updateExpression += updatedFields
-			.map((field) => {
-				return `#${field} = :${field}`;
-			})
-			.join(', ');
-	}
-
-	if (removedFields.length > 0) {
-		updateExpression += ' REMOVE ';
-		updateExpression += removedFields
-			.map((field) => {
-				return `#${field}`;
-			})
-			.join(', ');
-	}
-
-	Object.entries(updateData.set || {}).forEach(([field, value]) => {
-		attributesNames[`#${field}`] = field;
-		attributesValues[`:${field}`] = value;
-	});
-	removedFields.forEach((field) => {
-		attributesNames[`#${field}`] = field;
-	});
-
-	return {
-		UpdateExpression: updateExpression.trim(),
-		ExpressionAttributeNames: attributesNames,
-		ExpressionAttributeValues: marshallItem(attributesValues),
-	};
-};
-
 type Commands = {
 	GetItemCommand: typeof GetItemCommand;
 	PutItemCommand: typeof PutItemCommand;
@@ -100,11 +62,11 @@ type Commands = {
 
 export class Table {
 	_config: TableConfig;
-	_db: DynamoDBDocumentClient;
+	_db: DbClient;
 	_commands: Commands;
 	_entities: Record<string, Entity<any>>;
 
-	constructor(db: DynamoDBDocumentClient, config: TableConfig, commands: Commands) {
+	constructor(db: DbClient, config: TableConfig, commands: Commands) {
 		this._config = config;
 		this._db = db;
 		this._commands = commands;
@@ -113,10 +75,6 @@ export class Table {
 				return [entityConstructor.entityName, entityConstructor];
 			}),
 		);
-	}
-
-	dbClient() {
-		return this._db;
 	}
 
 	entity<T extends object>(type: string): Entity<T> | null {
@@ -128,35 +86,16 @@ export class Table {
 	}
 
 	get(key: Key): GetItemCommand {
-		const input: GetCommandInput = {
-			TableName: this._config.name,
-			Key: matchKeyToTable(key, this._config),
-		};
-
-		return new this._commands.GetItemCommand(this._db, input, this);
+		return new this._commands.GetItemCommand(this._db, this, matchKeyToTable(key, this._config));
 	}
 
 	query(condition: string, values: Record<string, NativeAttributeValue>): QueryItemsCommand {
-		const attributesNames = Object.fromEntries(Object.keys(values).map((key) => [`#${key}`, key]));
-		const attributesValues = Object.fromEntries(Object.entries(values).map(([key, value]) => [`:${key}`, value]));
-
-		const input: QueryCommandInput = {
-			TableName: this._config.name,
-			KeyConditionExpression: condition,
-			ExpressionAttributeNames: attributesNames,
-			ExpressionAttributeValues: attributesValues,
-		};
-
-		return new this._commands.QueryItemsCommand(this._db, input, this);
+		return new this._commands.QueryItemsCommand(this._db, this, condition, values);
 	}
 	put(record: EntityRecord): PutItemCommand {
 		record._created = new Date();
 		record._updated = new Date();
-		const input: PutCommandInput = {
-			TableName: this._config.name,
-			Item: marshallItem(record),
-		};
-		return new this._commands.PutItemCommand(this._db, input, this);
+		return new this._commands.PutItemCommand(this._db, this, marshallItem(record));
 	}
 	update(record: EntityRecord): UpdateItemCommand {
 		const primaryKey = (record as any)[this._config.primaryKey];
@@ -181,15 +120,7 @@ export class Table {
 	}
 
 	updateById(key: Key, updateData: UpdateData): UpdateItemCommand {
-		const updateInput = updateDataToInput(updateData);
-		const input: UpdateCommandInput = {
-			TableName: this._config.name,
-			Key: matchKeyToTable(key, this._config),
-			ReturnValues: 'ALL_NEW',
-			...updateInput,
-		};
-
-		return new this._commands.UpdateItemCommand(this._db, input, this);
+		return new this._commands.UpdateItemCommand(this._db, this, matchKeyToTable(key, this._config), updateData);
 	}
 
 	delete(record: EntityRecord): DeleteItemCommand {
@@ -209,18 +140,13 @@ export class Table {
 		return this.deleteById(key);
 	}
 	deleteById(key: Key): DeleteItemCommand {
-		const input: DeleteCommandInput = {
-			TableName: this._config.name,
-			Key: matchKeyToTable(key, this._config),
-			ReturnValues: 'ALL_OLD',
-		};
-
-		return new this._commands.DeleteItemCommand(this._db, input, this);
+		const cmd = new this._commands.DeleteItemCommand(this._db, this, matchKeyToTable(key, this._config));
+		cmd.returnOld();
+		return cmd;
 	}
-	send(): void {}
 }
 
-export const defineTable = (db: DynamoDBDocumentClient, config: TableConfig): Table => {
+export const defineTable = (db: DbClient, config: TableConfig): Table => {
 	return new Table(db, config, {
 		GetItemCommand,
 		UpdateItemCommand,

@@ -3,7 +3,11 @@ import { connect } from 'src/client';
 import { defineTable, Table } from 'src/table';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { defineEntity } from 'src/entity';
-import { DeleteItemCommand, GetItemCommand, PutItemCommand, QueryItemsCommand, UpdateItemCommand } from 'src/commands';
+import { DeleteItemCommand } from '../src/commands/delete';
+import { GetItemCommand } from '../src/commands/get';
+import { PutItemCommand } from '../src/commands/put';
+import { QueryItemsCommand } from '../src/commands/query';
+import { UpdateItemCommand } from '../src/commands/update';
 
 type Test = {
 	id: string;
