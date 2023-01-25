@@ -1,8 +1,7 @@
-import { vi, describe, it, beforeEach, expect } from 'vitest';
+import { vi, describe, it, beforeEach, expect, afterEach } from 'vitest';
 import { UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { UpdateResult, UpdateItemCommand } from 'src/commands/update';
-import { defineEntity } from 'src/entity';
-import { defineTable } from 'src/table';
+import { UpdateResult, UpdateItemCommand } from '../../src/commands/update';
+import { connect } from '../../src/mock';
 
 type Test = {
 	id: string;
@@ -14,7 +13,9 @@ type Test = {
 	sk?: string;
 };
 
-const TestEntity = defineEntity<Test>({
+const mockClient = connect('eu-west-1');
+
+const TestEntity = mockClient.defineEntity<Test>({
 	name: 'TEST',
 	computed: {
 		pk: {
@@ -26,6 +27,19 @@ const TestEntity = defineEntity<Test>({
 			get: (item) => (item.email ? `EMAIL#${item.email}` : undefined),
 		},
 	},
+});
+
+const table = mockClient.defineTable({
+	name: 'TestTable',
+	primaryKey: 'pk',
+	sortKey: 'sk',
+	indexes: {
+		ByEmail: {
+			primaryKey: 'orgId',
+			sortKey: 'email',
+		},
+	},
+	entities: [TestEntity],
 });
 
 describe('UpdateItem Command', () => {
@@ -59,30 +73,26 @@ describe('UpdateItem Command', () => {
 		ExpressionAttributeValues: { ':name': 'Gucio' },
 	};
 
-	let dbClient = {
-		send: vi.fn(),
-	}; // just for testing
-
-	const table = defineTable(dbClient as any, {
-		name: 'TestTable',
-		primaryKey: 'pk',
-		sortKey: 'sk',
-		indexes: {
-			ByEmail: {
-				primaryKey: 'orgId',
-				sortKey: 'email',
-			},
-		},
-		entities: [TestEntity],
-	});
-
 	beforeEach(() => {
-		dbClient.send.mockReturnValue({
+		mockClient.DbClientSendMock.mockReturnValue({
 			Attributes: item,
 		});
-		dbClient.send.mockClear();
 
-		cmd = new UpdateItemCommand(dbClient as never, input, table);
+		cmd = new UpdateItemCommand(
+			mockClient,
+			table,
+			{
+				pk: 'pk-value',
+				sk: 'sk-value',
+			},
+			{
+				set: { name: 'Gucio' },
+			},
+		);
+	});
+
+	afterEach(() => {
+		mockClient.clearMocks();
 	});
 
 	it('Should return instance of UpdateItemCommand on creation', () => {
@@ -91,15 +101,8 @@ describe('UpdateItem Command', () => {
 
 	it('Should send UpdateCommand to the dbClient', async () => {
 		await cmd.send();
-		expect(dbClient.send).toHaveBeenCalledTimes(1);
-		expect(dbClient.send.mock.lastCall![0]).toBeInstanceOf(UpdateCommand);
-	});
-
-	it('Should create UpdateCommand with a proper input', async () => {
-		await cmd.send();
-		const getCmd = dbClient.send.mock.lastCall![0];
-
-		expect(getCmd.input).toEqual(input);
+		expect(mockClient.DbClientSendMock).toHaveBeenCalledTimes(1);
+		expect(mockClient.DbClientSendMock.mock.lastCall![0]).toBeInstanceOf(UpdateCommand);
 	});
 
 	it('Should send command and return UpdateResult', async () => {
@@ -134,14 +137,14 @@ describe('UpdateItem Command', () => {
 	});
 
 	it('Should return null if no record found', async () => {
-		dbClient.send.mockResolvedValue({ Item: undefined });
+		mockClient.DbClientSendMock.mockResolvedValue({ Item: undefined });
 
 		const res = await cmd.send();
 		expect(res.item<Test>()).toBe(null);
 	});
 
 	it('Should throw if Item is missing _type attribute', async () => {
-		dbClient.send.mockResolvedValue({
+		mockClient.DbClientSendMock.mockResolvedValue({
 			Attributes: {
 				id: '12345',
 				name: 'Gucio',
@@ -170,6 +173,100 @@ describe('UpdateItem Command', () => {
 			_type: 'TEST',
 			pk: 'TEST#12345',
 			sk: 'EMAIL#damian@acme.com',
+		});
+	});
+
+	describe('Update Expression', () => {
+		it('Should create UpdateCommand with a simple SET input', async () => {
+			await cmd.send();
+			const getCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+
+			expect(getCmd.input).toEqual(input);
+		});
+
+		it('Should include two updated attributes', async () => {
+			const cmd = new UpdateItemCommand(
+				mockClient,
+				table,
+				{
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				{
+					set: { name: 'Gucio', orgId: 'PLUM' },
+				},
+			);
+			await cmd.send();
+			const getCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+
+			expect(getCmd.input).toEqual({
+				TableName: 'TestTable',
+				Key: {
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				ReturnValues: 'ALL_NEW',
+				UpdateExpression: 'SET #name = :name, #orgId = :orgId',
+				ExpressionAttributeNames: { '#name': 'name', '#orgId': 'orgId' },
+				ExpressionAttributeValues: { ':name': 'Gucio', ':orgId': 'PLUM' },
+			});
+		});
+
+		it('Should handle field removal expression', async () => {
+			const cmd = new UpdateItemCommand(
+				mockClient,
+				table,
+				{
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				{
+					remove: ['smth'],
+				},
+			);
+			await cmd.send();
+			const getCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+
+			expect(getCmd.input).toEqual({
+				TableName: 'TestTable',
+				Key: {
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				ReturnValues: 'ALL_NEW',
+				UpdateExpression: 'REMOVE #smth',
+				ExpressionAttributeNames: { '#smth': 'smth' },
+				ExpressionAttributeValues: {},
+			});
+		});
+
+		it('Should handle both update and removal expressions', async () => {
+			const cmd = new UpdateItemCommand(
+				mockClient,
+				table,
+				{
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				{
+					set: { name: 'Gucio', orgId: 'PLUM' },
+					remove: ['smth'],
+				},
+			);
+			await cmd.send();
+			const getCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+
+			expect(getCmd.input).toEqual({
+				TableName: 'TestTable',
+				Key: {
+					pk: 'pk-value',
+					sk: 'sk-value',
+				},
+				ReturnValues: 'ALL_NEW',
+				UpdateExpression: 'SET #name = :name, #orgId = :orgId REMOVE #smth',
+				ExpressionAttributeNames: { '#name': 'name', '#orgId': 'orgId', '#smth': 'smth' },
+				ExpressionAttributeValues: { ':name': 'Gucio', ':orgId': 'PLUM' },
+			});
 		});
 	});
 });

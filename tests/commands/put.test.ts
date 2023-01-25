@@ -1,8 +1,7 @@
-import { vi, describe, it, beforeEach, expect } from 'vitest';
+import { vi, describe, it, beforeEach, expect, afterEach } from 'vitest';
 import { PutCommand } from '@aws-sdk/lib-dynamodb';
-import { PutItemCommand, PutResult } from 'src/commands/put';
-import { defineEntity } from 'src/entity';
-import { defineTable } from 'src/table';
+import { PutItemCommand, PutResult } from '../../src/commands/put';
+import { connect } from '../../src/mock';
 
 type Test = {
 	id: string;
@@ -14,7 +13,9 @@ type Test = {
 	sk?: string;
 };
 
-const TestEntity = defineEntity<Test>({
+const mockClient = connect('eu-west-1');
+
+const TestEntity = mockClient.defineEntity<Test>({
 	name: 'TEST',
 	computed: {
 		pk: {
@@ -26,6 +27,19 @@ const TestEntity = defineEntity<Test>({
 			get: (item) => (item.email ? `EMAIL#${item.email}` : undefined),
 		},
 	},
+});
+
+const table = mockClient.defineTable({
+	name: 'TestTable',
+	primaryKey: 'pk',
+	sortKey: 'sk',
+	indexes: {
+		ByEmail: {
+			primaryKey: 'orgId',
+			sortKey: 'email',
+		},
+	},
+	entities: [TestEntity],
 });
 
 describe('PutItemCommand', () => {
@@ -47,37 +61,16 @@ describe('PutItemCommand', () => {
 		sk: 'EMAIL#damian@acme.com',
 	};
 
-	let dbClient = {
-		send: vi.fn(),
-	}; // just for testing
-
-	const table = defineTable(dbClient as any, {
-		name: 'TestTable',
-		primaryKey: 'pk',
-		sortKey: 'sk',
-		indexes: {
-			ByEmail: {
-				primaryKey: 'orgId',
-				sortKey: 'email',
-			},
-		},
-		entities: [TestEntity],
-	});
-
 	beforeEach(() => {
-		dbClient.send.mockResolvedValue({
+		mockClient.DbClientSendMock.mockResolvedValue({
 			Attributes: item,
 		});
-		dbClient.send.mockClear();
 
-		cmd = new PutItemCommand(
-			dbClient as never,
-			{
-				TableName: 'TestTable',
-				Item: item,
-			},
-			table,
-		);
+		cmd = new PutItemCommand(mockClient, table, item);
+	});
+
+	afterEach(() => {
+		mockClient.clearMocks();
 	});
 
 	it('Should return instance of PutItemCommand on creation', () => {
@@ -86,13 +79,13 @@ describe('PutItemCommand', () => {
 
 	it('Should send PutCommand to the dbClient', async () => {
 		await cmd.send();
-		expect(dbClient.send).toHaveBeenCalledTimes(1);
-		expect(dbClient.send.mock.lastCall![0]).toBeInstanceOf(PutCommand);
+		expect(mockClient.DbClientSendMock).toHaveBeenCalledTimes(1);
+		expect(mockClient.DbClientSendMock.mock.lastCall![0]).toBeInstanceOf(PutCommand);
 	});
 
 	it('Should create PutCommand with a proper input', async () => {
 		await cmd.send();
-		const getCmd = dbClient.send.mock.lastCall![0];
+		const getCmd = mockClient.DbClientSendMock.mock.lastCall![0];
 
 		expect(getCmd.input).toEqual({
 			TableName: 'TestTable',
@@ -132,14 +125,14 @@ describe('PutItemCommand', () => {
 	});
 
 	it('Should return null if no record found', async () => {
-		dbClient.send.mockResolvedValue({ Item: undefined });
+		mockClient.DbClientSendMock.mockResolvedValue({ Item: undefined });
 
 		const res = await cmd.send();
 		expect(res.item<Test>()).toBe(null);
 	});
 
 	it('Should throw if Item is missing _type attribute', async () => {
-		dbClient.send.mockResolvedValue({
+		mockClient.DbClientSendMock.mockResolvedValue({
 			Attributes: {
 				id: '12345',
 				name: 'Damian',

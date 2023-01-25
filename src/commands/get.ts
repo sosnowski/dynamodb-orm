@@ -7,7 +7,7 @@ import type { Table } from '../table';
 import { Command, Result } from './base';
 import { DbClient } from 'src/client';
 
-export class GetItemCommand extends Command<GetCommandInput, GetCommandOutput, GetResult> {
+export class GetItemCommand extends Command<GetCommandInput, GetCommand, GetCommandOutput, GetResult> {
 	key: Record<string, string>;
 
 	constructor(db: DbClient, table: Table, key: Record<string, string>) {
@@ -15,16 +15,18 @@ export class GetItemCommand extends Command<GetCommandInput, GetCommandOutput, G
 		this.key = key;
 	}
 
-	input(): GetCommandInput {
-		return {
-			TableName: this.table.config().name,
-			Key: this.key,
-		}; // TODO: Merge with options
+	send(): Promise<GetResult> {
+		return this.db.sendCommand(this);
 	}
 
-	async send(): Promise<GetResult> {
-		const output: GetCommandOutput = await this.db.send(new GetCommand(this.input()));
+	result(output: GetCommandOutput): GetResult {
 		return new GetResult(output, this.table);
+	}
+	command(): GetCommand {
+		return new GetCommand({
+			TableName: this.table.name,
+			Key: this.key,
+		});
 	}
 }
 

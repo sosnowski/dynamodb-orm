@@ -1,8 +1,7 @@
-import { describe, beforeEach, it, expect, vi } from 'vitest';
-import { connect } from 'src/client';
-import { defineTable, Table } from 'src/table';
+import { describe, beforeEach, it, expect, vi, afterEach } from 'vitest';
+import { connect, MockORMClient } from '../src/mock';
+import { Table } from '../src/table';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { defineEntity } from 'src/entity';
 import { DeleteItemCommand } from '../src/commands/delete';
 import { GetItemCommand } from '../src/commands/get';
 import { PutItemCommand } from '../src/commands/put';
@@ -19,8 +18,8 @@ type Test = {
 	sk?: string;
 };
 
-const dbClient = connect('eu-west-1');
-const TestEntity = defineEntity<Test>({
+const mockClient = connect('eu-west-1');
+const TestEntity = mockClient.defineEntity<Test>({
 	name: 'TEST',
 	computed: {
 		pk: {
@@ -34,87 +33,41 @@ const TestEntity = defineEntity<Test>({
 	},
 });
 
+const table = mockClient.defineTable({
+	name: 'TestTable',
+	primaryKey: 'pk',
+	sortKey: 'sk',
+	indexes: {
+		ByEmail: {
+			primaryKey: 'orgId',
+			sortKey: 'email',
+		},
+	},
+	entities: [TestEntity],
+});
+const tableNoSortKey = mockClient.defineTable({
+	name: 'TestTableNoSort',
+	primaryKey: 'pk',
+	indexes: {
+		ByEmail: {
+			primaryKey: 'orgId',
+			sortKey: 'email',
+		},
+	},
+	entities: [TestEntity],
+});
+
+afterEach(() => {
+	mockClient.clearMocks();
+});
+
 describe('Table instance creation', () => {
-	let table: Table;
-
-	beforeEach(() => {
-		table = defineTable(dbClient, {
-			name: 'TestTable',
-			primaryKey: 'pk',
-			sortKey: 'sk',
-			entities: [TestEntity],
-		});
-	});
-
 	it('Should create a valid table instance', () => {
 		expect(table).toBeInstanceOf(Table);
-	});
-
-	it('Should return DynamoDB Client', () => {
-		expect(table.dbClient()).toBeInstanceOf(DynamoDBDocumentClient);
 	});
 });
 
 describe('Table operations', () => {
-	const GetItemCommandMock = vi.fn().mockImplementation((...args: [any, any, any]) => new GetItemCommand(...args));
-	const PutItemCommandMock = vi.fn().mockImplementation((...args: [any, any, any]) => new PutItemCommand(...args));
-	const UpdateItemCommandMock = vi.fn().mockImplementation((...args: [any, any, any]) => new UpdateItemCommand(...args));
-	const DeleteItemCommandMock = vi.fn().mockImplementation((...args: [any, any, any]) => new DeleteItemCommand(...args));
-	const QueryItemsCommandMock = vi.fn().mockImplementation((...args: [any, any, any]) => new QueryItemsCommand(...args));
-
-	const table = new Table(
-		dbClient,
-		{
-			name: 'TestTable',
-			primaryKey: 'pk',
-			sortKey: 'sk',
-			indexes: {
-				ByEmail: {
-					primaryKey: 'orgId',
-					sortKey: 'email',
-				},
-			},
-			entities: [TestEntity],
-		},
-		{
-			GetItemCommand: GetItemCommandMock,
-			PutItemCommand: PutItemCommandMock,
-			UpdateItemCommand: UpdateItemCommandMock,
-			DeleteItemCommand: DeleteItemCommandMock,
-			QueryItemsCommand: QueryItemsCommandMock,
-		},
-	);
-
-	const tableNoSortKey = new Table(
-		dbClient,
-		{
-			name: 'TestTableNoSort',
-			primaryKey: 'pk',
-			indexes: {
-				ByEmail: {
-					primaryKey: 'orgId',
-					sortKey: 'email',
-				},
-			},
-			entities: [TestEntity],
-		},
-		{
-			GetItemCommand: GetItemCommandMock,
-			PutItemCommand: PutItemCommandMock,
-			UpdateItemCommand: UpdateItemCommandMock,
-			DeleteItemCommand: DeleteItemCommandMock,
-			QueryItemsCommand: QueryItemsCommandMock,
-		},
-	);
-
-	beforeEach(() => {
-		GetItemCommandMock.mockClear();
-		PutItemCommandMock.mockClear();
-		UpdateItemCommandMock.mockClear();
-		DeleteItemCommandMock.mockClear();
-		QueryItemsCommandMock.mockClear();
-	});
-
 	describe('Get Command', () => {
 		it('Should return a GetCommand on get() operation', () => {
 			const cmd = table.get({
@@ -122,7 +75,7 @@ describe('Table operations', () => {
 				sortKey: 'skvalue',
 			});
 
-			expect(GetItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.GetItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(GetItemCommand);
 		});
 
@@ -132,7 +85,29 @@ describe('Table operations', () => {
 				sortKey: 'skvalue',
 			});
 
-			expect(GetItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.GetItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
+		});
+
+		it('Should pass a Table instance to the Command', () => {
+			table.get({
+				primaryKey: 'pkvalue',
+				sortKey: 'skvalue',
+			});
+
+			expect(mockClient.GetItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.GetItemCommandMock.mock.lastCall![1]).toBe(table);
+		});
+
+		it('Should pass a valid composite Key to the Command', () => {
+			table.get({
+				primaryKey: 'pkvalue',
+				sortKey: 'skvalue',
+			});
+
+			expect(mockClient.GetItemCommandMock.mock.lastCall![2]).toEqual({
+				pk: 'pkvalue',
+				sk: 'skvalue',
+			});
 		});
 
 		it('Should throw error about missing sortKey', () => {
@@ -148,32 +123,8 @@ describe('Table operations', () => {
 				primaryKey: 'pkvalue',
 			});
 
-			expect(GetItemCommandMock.mock.lastCall![1]).toEqual({
-				TableName: 'TestTableNoSort',
-				Key: {
-					pk: 'pkvalue',
-				},
-			});
-		});
-
-		it('Should provide GetCommand with a valid table name', () => {
-			table.get({
-				primaryKey: 'pkvalue',
-				sortKey: 'skvalue',
-			});
-
-			expect(GetItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
-		});
-
-		it('Should provide GetCommand with a valid primaryKey and sortKey', () => {
-			table.get({
-				primaryKey: 'pkvalue',
-				sortKey: 'skvalue',
-			});
-
-			expect(GetItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.GetItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'pkvalue',
-				sk: 'skvalue',
 			});
 		});
 	});
@@ -192,20 +143,21 @@ describe('Table operations', () => {
 		it('Should return a PutCommand on put() operation', () => {
 			const cmd = table.put(record);
 
-			expect(PutItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.PutItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(PutItemCommand);
 		});
 
 		it('Should pass a DbClient to the Command', () => {
 			table.put(record);
 
-			expect(PutItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.PutItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
-		it('Should provide PutCommand with a valid TableName', () => {
+		it('Should pass a Table instance to the Command', () => {
 			table.put(record);
 
-			expect(PutItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.PutItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.PutItemCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide PutCommand with the marshalled Item', () => {
@@ -214,7 +166,7 @@ describe('Table operations', () => {
 			const createdIso = record._created.toISOString();
 			const updatedIso = record._updated.toISOString();
 
-			expect(PutItemCommandMock.mock.lastCall![1].Item).toEqual({
+			expect(mockClient.PutItemCommandMock.mock.lastCall![2]).toEqual({
 				id: '12345',
 				name: 'Damian',
 				orgId: 'ACME',
@@ -244,26 +196,27 @@ describe('Table operations', () => {
 		it('Should return a DeleteItemCommand on delete() operation', () => {
 			const cmd = table.delete(record);
 
-			expect(DeleteItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.DeleteItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(DeleteItemCommand);
 		});
 
 		it('Should pass a DbClient to the Command', () => {
 			table.delete(record);
 
-			expect(DeleteItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
-		it('Should provide DelteItemCommand with a valid table name', () => {
+		it('Should pass a Table instance to the Command', () => {
 			table.delete(record);
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide DelteItemCommand with a valid composite record Key', () => {
 			table.delete(record);
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'TEST#12345',
 				sk: 'EMAIL#damian@acme.com',
 			});
@@ -272,7 +225,7 @@ describe('Table operations', () => {
 		it('Should provide DelteItemCommand with a valid record partitionKey if Table has no sortKey', () => {
 			tableNoSortKey.delete(record);
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'TEST#12345',
 			});
 		});
@@ -292,7 +245,7 @@ describe('Table operations', () => {
 				sortKey: 'skvalue',
 			});
 
-			expect(DeleteItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.DeleteItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(DeleteItemCommand);
 		});
 
@@ -302,16 +255,17 @@ describe('Table operations', () => {
 				sortKey: 'skvalue',
 			});
 
-			expect(DeleteItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
-		it('Should provide DelteItemCommand with a valid table name', () => {
+		it('Should pass a Table instance to the Command', () => {
 			table.deleteById({
 				primaryKey: 'pkvalue',
 				sortKey: 'skvalue',
 			});
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide DelteItemCommand with a valid composite record Key', () => {
@@ -320,7 +274,7 @@ describe('Table operations', () => {
 				sortKey: 'skvalue',
 			});
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'pkvalue',
 				sk: 'skvalue',
 			});
@@ -331,7 +285,7 @@ describe('Table operations', () => {
 				primaryKey: 'pkvalue',
 			});
 
-			expect(DeleteItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.DeleteItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'pkvalue',
 			});
 		});
@@ -349,44 +303,33 @@ describe('Table operations', () => {
 		it('Should return a QueryItemsCommand on query() operation', () => {
 			const cmd = table.query('#pk = :pk', { pk: 'some-value' });
 
-			expect(QueryItemsCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.QueryItemsCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(QueryItemsCommand);
 		});
 
 		it('Should pass a DbClient to the Command', () => {
 			table.query('#pk = :pk', { pk: 'some-value' });
 
-			expect(QueryItemsCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.QueryItemsCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
-		it('Should provide QueryItemsCommand with a valid table name', () => {
+		it('Should pass a Table instance to the Command', () => {
 			table.query('#pk = :pk', { pk: 'some-value' });
 
-			expect(QueryItemsCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.QueryItemsCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.QueryItemsCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide QueryItemsCommand with a valid condition expression', () => {
 			table.query('#pk = :pk', { pk: 'some-value' });
 
-			expect(QueryItemsCommandMock.mock.lastCall![1].KeyConditionExpression).toBe('#pk = :pk');
+			expect(mockClient.QueryItemsCommandMock.mock.lastCall![2]).toBe('#pk = :pk');
 		});
 
-		it('Should provide QueryItemsCommand with a set of ExpressionAttributesNames', () => {
+		it('Should provide QueryItemsCommand with query values', () => {
 			table.query('#pk = :pk AND begins_with(#sk, :sk)', { pk: 'some-value', sk: 'some-sk' });
 
-			expect(QueryItemsCommandMock.mock.lastCall![1].ExpressionAttributeNames).toEqual({
-				'#pk': 'pk',
-				'#sk': 'sk',
-			});
-		});
-
-		it('Should provide QueryItemsCommand with a set of ExpressionAttributesValues', () => {
-			table.query('#pk = :pk AND begins_with(#sk, :sk)', { pk: 'some-value', sk: 'some-sk' });
-
-			expect(QueryItemsCommandMock.mock.lastCall![1].ExpressionAttributeValues).toEqual({
-				':pk': 'some-value',
-				':sk': 'some-sk',
-			});
+			expect(mockClient.QueryItemsCommandMock.mock.lastCall![3]).toEqual({ pk: 'some-value', sk: 'some-sk' });
 		});
 	});
 
@@ -406,33 +349,30 @@ describe('Table operations', () => {
 		it('Should return a UpdateItemCommand on update() operation', () => {
 			const cmd = table.update(record);
 
-			expect(UpdateItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.UpdateItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(UpdateItemCommand);
 		});
 
 		it('Should pass a DbClient to the Command', () => {
 			record.name = 'Gucio';
-			delete record.smth;
-
 			table.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
-		it('Should provide UpdateItemCommand with a valid table name', () => {
+		it('Should pass a Table instance to the Command', () => {
 			record.name = 'Gucio';
-			delete record.smth;
-
 			table.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide UpdateItemCommand with a valid composite record key', () => {
 			record.name = 'Gucio';
 			table.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'TEST#12345',
 				sk: 'EMAIL#damian@acme.com',
 			});
@@ -450,7 +390,7 @@ describe('Table operations', () => {
 
 			tableNoSortKey.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'TEST#12345',
 			});
 		});
@@ -468,40 +408,44 @@ describe('Table operations', () => {
 			}).toThrowError();
 		});
 
-		it('Should provide UpdateItemCommand with a valid UpdateExpression', () => {
+		it('Should provide UpdateItemCommand with a valid update data', () => {
 			record.name = 'Gucio';
 			delete record.smth;
 
 			table.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].UpdateExpression).toBe('SET #name = :name, #_updated = :_updated REMOVE #smth');
-		});
-
-		it('Should provide UpdateItemCommand with a set of ExpressionAttributesNames', () => {
-			record.name = 'Gucio';
-			delete record.smth;
-
-			table.update(record);
-
-			expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeNames).toEqual({
-				'#name': 'name',
-				'#smth': 'smth',
-				'#_updated': '_updated',
+			const updated = record._updated;
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![3]).toEqual({
+				set: { name: 'Gucio', _updated: updated },
+				remove: ['smth'],
 			});
 		});
 
-		it('Should provide UpdateItemCommand with a set of marshalled ExpressionAttributesValues', () => {
-			record.name = 'Gucio';
-			delete record.smth;
-			table.update(record);
+		// it('Should provide UpdateItemCommand with a set of ExpressionAttributesNames', () => {
+		// 	record.name = 'Gucio';
+		// 	delete record.smth;
 
-			const updatedIso = record._updated.toISOString();
+		// 	table.update(record);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeValues).toEqual({
-				':name': 'Gucio',
-				':_updated': updatedIso,
-			});
-		});
+		// 	expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeNames).toEqual({
+		// 		'#name': 'name',
+		// 		'#smth': 'smth',
+		// 		'#_updated': '_updated',
+		// 	});
+		// });
+
+		// it('Should provide UpdateItemCommand with a set of marshalled ExpressionAttributesValues', () => {
+		// 	record.name = 'Gucio';
+		// 	delete record.smth;
+		// 	table.update(record);
+
+		// 	const updatedIso = record._updated.toISOString();
+
+		// 	expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeValues).toEqual({
+		// 		':name': 'Gucio',
+		// 		':_updated': updatedIso,
+		// 	});
+		// });
 	});
 
 	describe('UpdateById command', () => {
@@ -518,7 +462,7 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock).toHaveBeenCalledOnce();
+			expect(mockClient.UpdateItemCommandMock).toHaveBeenCalledOnce();
 			expect(cmd).toBeInstanceOf(UpdateItemCommand);
 		});
 
@@ -535,7 +479,7 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock.mock.lastCall![0]).toBeInstanceOf(DynamoDBDocumentClient);
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![0]).toBeInstanceOf(MockORMClient);
 		});
 
 		it('Should provide UpdateItemCommand with a valid table name', () => {
@@ -551,7 +495,8 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].TableName).toBe('TestTable');
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![1]).toBeInstanceOf(Table);
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![1]).toBe(table);
 		});
 
 		it('Should provide UpdateItemCommand with a valid record key', () => {
@@ -567,7 +512,7 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'pk-value',
 				sk: 'sk-value',
 			});
@@ -584,7 +529,7 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].Key).toEqual({
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![2]).toEqual({
 				pk: 'pk-value',
 			});
 		});
@@ -603,7 +548,7 @@ describe('Table operations', () => {
 			}).toThrowError();
 		});
 
-		it('Should provide UpdateItemCommand with a valid UpdateExpression', () => {
+		it('Should provide UpdateItemCommand with a valid UpdateData', () => {
 			const updated = new Date();
 			table.updateById(
 				{
@@ -616,46 +561,49 @@ describe('Table operations', () => {
 				},
 			);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].UpdateExpression).toBe('SET #name = :name, #_updated = :_updated REMOVE #smth');
-		});
-
-		it('Should provide UpdateItemCommand with a set of ExpressionAttributesNames', () => {
-			const updated = new Date();
-			table.updateById(
-				{
-					primaryKey: 'pk-value',
-					sortKey: 'sk-value',
-				},
-				{
-					set: { name: 'Gucio', _updated: updated },
-					remove: ['smth'],
-				},
-			);
-
-			expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeNames).toEqual({
-				'#name': 'name',
-				'#smth': 'smth',
-				'#_updated': '_updated',
+			expect(mockClient.UpdateItemCommandMock.mock.lastCall![3]).toEqual({
+				set: { name: 'Gucio', _updated: updated },
+				remove: ['smth'],
 			});
 		});
 
-		it('Should provide UpdateItemCommand with a set of marshalled ExpressionAttributesValues', () => {
-			const updated = new Date();
-			table.updateById(
-				{
-					primaryKey: 'pk-value',
-					sortKey: 'sk-value',
-				},
-				{
-					set: { name: 'Gucio', _updated: updated },
-					remove: ['smth'],
-				},
-			);
+		// it('Should provide UpdateItemCommand with a set of ExpressionAttributesNames', () => {
+		// 	const updated = new Date();
+		// 	table.updateById(
+		// 		{
+		// 			primaryKey: 'pk-value',
+		// 			sortKey: 'sk-value',
+		// 		},
+		// 		{
+		// 			set: { name: 'Gucio', _updated: updated },
+		// 			remove: ['smth'],
+		// 		},
+		// 	);
 
-			expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeValues).toEqual({
-				':name': 'Gucio',
-				':_updated': updated.toISOString(),
-			});
-		});
+		// 	expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeNames).toEqual({
+		// 		'#name': 'name',
+		// 		'#smth': 'smth',
+		// 		'#_updated': '_updated',
+		// 	});
+		// });
+
+		// it('Should provide UpdateItemCommand with a set of marshalled ExpressionAttributesValues', () => {
+		// 	const updated = new Date();
+		// 	table.updateById(
+		// 		{
+		// 			primaryKey: 'pk-value',
+		// 			sortKey: 'sk-value',
+		// 		},
+		// 		{
+		// 			set: { name: 'Gucio', _updated: updated },
+		// 			remove: ['smth'],
+		// 		},
+		// 	);
+
+		// 	expect(UpdateItemCommandMock.mock.lastCall![1].ExpressionAttributeValues).toEqual({
+		// 		':name': 'Gucio',
+		// 		':_updated': updated.toISOString(),
+		// 	});
+		// });
 	});
 });

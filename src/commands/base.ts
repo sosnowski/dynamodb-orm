@@ -2,7 +2,7 @@ import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { DbClient } from 'src/client';
 import type { Table } from '../table';
 
-export abstract class Command<Input extends {}, Output, Res extends Result<Output>> {
+export abstract class Command<Input, DbCommand, Output, Res extends Result<Output>> {
 	db: DbClient;
 	table: Table;
 	opts: Partial<Input>;
@@ -12,13 +12,15 @@ export abstract class Command<Input extends {}, Output, Res extends Result<Outpu
 		this.opts = {};
 	}
 
-	options(options: Partial<Input>): Command<Input, Output, Res> {
+	options(options: Partial<Input>): Command<Input, DbCommand, Output, Res> {
 		Object.assign(this.opts, options);
 		return this;
 	}
 
 	abstract send(): Promise<Res>;
-	abstract input(): Input;
+
+	abstract result(output: Output): Res;
+	abstract command(): DbCommand;
 }
 
 export abstract class Result<Output> {

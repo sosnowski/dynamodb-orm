@@ -1,8 +1,7 @@
-import { vi, describe, it, beforeEach, expect } from 'vitest';
+import { vi, describe, it, beforeEach, expect, afterEach } from 'vitest';
 import { QueryCommand } from '@aws-sdk/lib-dynamodb';
-import { QueryItemsCommand, QueryResult } from 'src/commands/query';
-import { defineEntity } from 'src/entity';
-import { defineTable } from 'src/table';
+import { QueryItemsCommand, QueryResult } from '../../src/commands/query';
+import { connect } from '../../src/mock';
 
 type Test = {
 	id: string;
@@ -14,7 +13,9 @@ type Test = {
 	sk?: string;
 };
 
-const TestEntity = defineEntity<Test>({
+const mockClient = connect('eu-west-1');
+
+const TestEntity = mockClient.defineEntity<Test>({
 	name: 'TEST',
 	computed: {
 		pk: {
@@ -26,6 +27,19 @@ const TestEntity = defineEntity<Test>({
 			get: (item) => (item.email ? `EMAIL#${item.email}` : undefined),
 		},
 	},
+});
+
+const table = mockClient.defineTable({
+	name: 'TestTable',
+	primaryKey: 'pk',
+	sortKey: 'sk',
+	indexes: {
+		ByEmail: {
+			primaryKey: 'orgId',
+			sortKey: 'email',
+		},
+	},
+	entities: [TestEntity],
 });
 
 describe('QueryItems Command', () => {
@@ -68,30 +82,16 @@ describe('QueryItems Command', () => {
 		ExpressionAttributeValues: { ':pk': 'pk-value' },
 	};
 
-	let dbClient = {
-		send: vi.fn(),
-	}; // just for testing
-
-	const table = defineTable(dbClient as any, {
-		name: 'TestTable',
-		primaryKey: 'pk',
-		sortKey: 'sk',
-		indexes: {
-			ByEmail: {
-				primaryKey: 'orgId',
-				sortKey: 'email',
-			},
-		},
-		entities: [TestEntity],
-	});
-
 	beforeEach(() => {
-		dbClient.send.mockResolvedValue({
+		mockClient.DbClientSendMock.mockResolvedValue({
 			Items: items,
 		});
-		dbClient.send.mockClear();
 
-		cmd = new QueryItemsCommand(dbClient as never, input, table);
+		cmd = new QueryItemsCommand(mockClient, table, '#pk = :pk', { pk: 'pk-value' });
+	});
+
+	afterEach(() => {
+		mockClient.clearMocks();
 	});
 
 	it('Should return instance of QueryItemsCommand on creation', () => {
@@ -100,15 +100,8 @@ describe('QueryItems Command', () => {
 
 	it('Should send QueryCommand to the dbClient', async () => {
 		await cmd.send();
-		expect(dbClient.send).toHaveBeenCalledTimes(1);
-		expect(dbClient.send.mock.lastCall![0]).toBeInstanceOf(QueryCommand);
-	});
-
-	it('Should create QueryCommand with a proper input', async () => {
-		await cmd.send();
-		const getCmd = dbClient.send.mock.lastCall![0];
-
-		expect(getCmd.input).toEqual(input);
+		expect(mockClient.DbClientSendMock).toHaveBeenCalledTimes(1);
+		expect(mockClient.DbClientSendMock.mock.lastCall![0]).toBeInstanceOf(QueryCommand);
 	});
 
 	it('Should send command and return QueryResult', async () => {
@@ -157,14 +150,14 @@ describe('QueryItems Command', () => {
 	});
 
 	it('Should return null if no record found', async () => {
-		dbClient.send.mockResolvedValue({ Items: undefined });
+		mockClient.DbClientSendMock.mockResolvedValue({ Items: undefined });
 
 		const res = await cmd.send();
 		expect(res.items<Test>()).toEqual([]);
 	});
 
 	it('Should throw if Item is missing _type attribute', async () => {
-		dbClient.send.mockResolvedValue({
+		mockClient.DbClientSendMock.mockResolvedValue({
 			Items: [
 				{
 					id: '12345',
@@ -185,5 +178,30 @@ describe('QueryItems Command', () => {
 	it('The result should return raw data object from the output', async () => {
 		const res = await cmd.send();
 		expect(res.raw()).toEqual(items);
+	});
+
+	describe('Query Expressions', () => {
+		it('Should create QueryCommand with a proper input', async () => {
+			await cmd.send();
+			const queryCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+
+			expect(queryCmd.input).toEqual(input);
+		});
+
+		it('Should handle query with both primary and secondary index', async () => {
+			const cmd = new QueryItemsCommand(mockClient, table, '#pk = :pk abd and begins_with(LEAD, :sk)', {
+				pk: 'pk-value',
+				sk: 'sk-value',
+			});
+			await cmd.send();
+
+			const queryCmd = mockClient.DbClientSendMock.mock.lastCall![0];
+			expect(queryCmd.input).toEqual({
+				TableName: 'TestTable',
+				KeyConditionExpression: '#pk = :pk abd and begins_with(LEAD, :sk)',
+				ExpressionAttributeNames: { '#pk': 'pk', '#sk': 'sk' },
+				ExpressionAttributeValues: { ':pk': 'pk-value', ':sk': 'sk-value' },
+			});
+		});
 	});
 });

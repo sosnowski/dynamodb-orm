@@ -1,18 +1,27 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { Command, Result } from './commands/base';
+import { DeleteItemCommand } from './commands/delete';
+import { GetItemCommand } from './commands/get';
+import { PutItemCommand } from './commands/put';
+import { QueryItemsCommand } from './commands/query';
+import { UpdateItemCommand } from './commands/update';
 import { EntityConfig, defineEntity, EntityRecord, Entity } from './entity';
-import { TableConfig, defineTable, Table } from './table';
+import { TableConfig, Table } from './table';
 
-let dbClient: DbClient;
+let dbClient: ORMClient;
 
 export interface DbClient {
 	defineTable(config: TableConfig): Table;
 	defineEntity<T extends object>(config: EntityConfig<T & EntityRecord>): Entity<T>;
 	send<Cmd, Output>(cmd: Cmd): Promise<Output>;
+	sendCommand<Input, DbCommand, Output, Res extends Result<Output>, Cmd extends Command<Input, DbCommand, Output, Res>>(
+		command: Cmd,
+	): Promise<Res>;
+	dbClient(): DynamoDBDocumentClient;
 }
 
-export const connect = (region: string): DbClient => {
+export const connect = (region: string): ORMClient => {
 	if (!dbClient) {
 		const dynamoClient = DynamoDBDocumentClient.from(
 			new DynamoDBClient({
@@ -38,7 +47,17 @@ export class ORMClient implements DbClient {
 	}
 
 	defineTable(config: TableConfig): Table {
-		return defineTable(this, config);
+		return new Table(this, config, {
+			GetItemCommand,
+			UpdateItemCommand,
+			QueryItemsCommand,
+			DeleteItemCommand,
+			PutItemCommand,
+		});
+	}
+
+	dbClient(): DynamoDBDocumentClient {
+		return this.db;
 	}
 
 	defineEntity<T extends object>(config: EntityConfig<T & EntityRecord>): Entity<T> {
@@ -48,6 +67,13 @@ export class ORMClient implements DbClient {
 	async send<Cmd, Output>(cmd: Cmd): Promise<Output> {
 		// TODO better typing needed
 		return (await this.db.send(cmd as never)) as Output;
+	}
+
+	async sendCommand<Input, DbCommand, Output, Res extends Result<Output>, Cmd extends Command<Input, DbCommand, Output, Res>>(
+		command: Cmd,
+	): Promise<Res> {
+		const output: Output = await this.send(command.command());
+		return command.result(output);
 	}
 
 	batchWrite(): void {}

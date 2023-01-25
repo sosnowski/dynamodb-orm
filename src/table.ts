@@ -65,8 +65,10 @@ export class Table {
 	_db: DbClient;
 	_commands: Commands;
 	_entities: Record<string, Entity<any>>;
+	name: string;
 
 	constructor(db: DbClient, config: TableConfig, commands: Commands) {
+		this.name = config.name;
 		this._config = config;
 		this._db = db;
 		this._commands = commands;
@@ -145,13 +147,3 @@ export class Table {
 		return cmd;
 	}
 }
-
-export const defineTable = (db: DbClient, config: TableConfig): Table => {
-	return new Table(db, config, {
-		GetItemCommand,
-		UpdateItemCommand,
-		QueryItemsCommand,
-		DeleteItemCommand,
-		PutItemCommand,
-	});
-};

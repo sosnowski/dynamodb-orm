@@ -50,7 +50,7 @@ const updateDataToInput = (
 	};
 };
 
-export class UpdateItemCommand extends Command<UpdateCommandInput, UpdateCommandOutput, UpdateResult> {
+export class UpdateItemCommand extends Command<UpdateCommandInput, UpdateCommand, UpdateCommandOutput, UpdateResult> {
 	key: Record<string, string>;
 	data: UpdateData;
 
@@ -60,20 +60,22 @@ export class UpdateItemCommand extends Command<UpdateCommandInput, UpdateCommand
 		this.data = updateData;
 	}
 
-	async send(): Promise<UpdateResult> {
-		const output: UpdateCommandOutput = await this.db.send(new UpdateCommand(this.input()));
-		return new UpdateResult(output, this.table);
+	send(): Promise<UpdateResult> {
+		return this.db.sendCommand(this);
 	}
 
-	input(): UpdateCommandInput {
+	result(output: UpdateCommandOutput): UpdateResult {
+		return new UpdateResult(output, this.table);
+	}
+	command(): UpdateCommand {
 		const updateInput = updateDataToInput(this.data);
 
-		return {
+		return new UpdateCommand({
 			TableName: this.table.config().name,
 			Key: this.key,
 			ReturnValues: 'ALL_NEW',
 			...updateInput,
-		}; // TODO: Merge with options
+		});
 	}
 
 	returnOld(): UpdateItemCommand {

@@ -7,23 +7,25 @@ import type { Table } from '../table';
 import { Command, Result } from './base';
 import { DbClient } from 'src/client';
 
-export class PutItemCommand extends Command<PutCommandInput, PutCommandOutput, PutResult> {
+export class PutItemCommand extends Command<PutCommandInput, PutCommand, PutCommandOutput, PutResult> {
 	item: Record<string, any>;
 	constructor(db: DbClient, table: Table, item: Record<string, string>) {
 		super(db, table);
 		this.item = item;
 	}
 
-	async send(): Promise<PutResult> {
-		const output: PutCommandOutput = await this.db.send(new PutCommand(this.input()));
-		return new PutResult(output, this.table);
+	send(): Promise<PutResult> {
+		return this.db.sendCommand(this);
 	}
 
-	input(): PutCommandInput {
-		return {
-			TableName: this.table.config().name,
+	result(output: PutCommandOutput): PutResult {
+		return new PutResult(output, this.table);
+	}
+	command(): PutCommand {
+		return new PutCommand({
+			TableName: this.table.name,
 			Item: this.item,
-		}; // TODO: Merge with options
+		});
 	}
 
 	returnOld(): PutItemCommand {

@@ -7,7 +7,7 @@ import type { Table } from '../table';
 import { Command, Result } from './base';
 import { DbClient } from 'src/client';
 
-export class QueryItemsCommand extends Command<QueryCommandInput, QueryCommandOutput, QueryResult> {
+export class QueryItemsCommand extends Command<QueryCommandInput, QueryCommand, QueryCommandOutput, QueryResult> {
 	condition: string;
 	values: Record<string, any>;
 	constructor(db: DbClient, table: Table, condition: string, values: Record<string, any>) {
@@ -16,21 +16,23 @@ export class QueryItemsCommand extends Command<QueryCommandInput, QueryCommandOu
 		this.values = values;
 	}
 
-	input(): QueryCommandInput {
+	send(): Promise<QueryResult> {
+		return this.db.sendCommand(this);
+	}
+
+	result(output: QueryCommandOutput): QueryResult {
+		return new QueryResult(output, this.table);
+	}
+	command(): QueryCommand {
 		const attributesNames = Object.fromEntries(Object.keys(this.values).map((key) => [`#${key}`, key]));
 		const attributesValues = Object.fromEntries(Object.entries(this.values).map(([key, value]) => [`:${key}`, value]));
 
-		return {
+		return new QueryCommand({
 			TableName: this.table.config().name,
 			KeyConditionExpression: this.condition,
 			ExpressionAttributeNames: attributesNames,
 			ExpressionAttributeValues: attributesValues,
-		};
-	}
-
-	async send(): Promise<QueryResult> {
-		const output: QueryCommandOutput = await this.db.send(new QueryCommand(this.input()));
-		return new QueryResult(output, this.table);
+		});
 	}
 
 	index(indexName: string): QueryItemsCommand {

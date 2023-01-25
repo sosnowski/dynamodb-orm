@@ -7,7 +7,7 @@ import type { Table } from '../table';
 import { Command, Result } from './base';
 import { DbClient } from 'src/client';
 
-export class DeleteItemCommand extends Command<DeleteCommandInput, DeleteCommandOutput, DeleteResult> {
+export class DeleteItemCommand extends Command<DeleteCommandInput, DeleteCommand, DeleteCommandOutput, DeleteResult> {
 	key: Record<string, string>;
 
 	constructor(db: DbClient, table: Table, key: Record<string, string>) {
@@ -15,16 +15,18 @@ export class DeleteItemCommand extends Command<DeleteCommandInput, DeleteCommand
 		this.key = key;
 	}
 
-	async send(): Promise<DeleteResult> {
-		const output: DeleteCommandOutput = await this.db.send(new DeleteCommand(this.input()));
-		return new DeleteResult(output, this.table);
+	send(): Promise<DeleteResult> {
+		return this.db.sendCommand(this);
 	}
 
-	input(): DeleteCommandInput {
-		return {
-			TableName: this.table.config().name,
+	result(output: DeleteCommandOutput): DeleteResult {
+		return new DeleteResult(output, this.table);
+	}
+	command(): DeleteCommand {
+		return new DeleteCommand({
+			TableName: this.table.name,
 			Key: this.key,
-		}; // TODO: Merge with options
+		});
 	}
 
 	returnOld(): DeleteItemCommand {
